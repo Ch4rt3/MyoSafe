@@ -1,4 +1,3 @@
-# muscle_monitoring
-
-A new Flutter project.
 # MyoSafe
+A new Flutter project.
+
