@@ -14,6 +14,7 @@ class BleScreen extends StatelessWidget {
         init: BleController(),
         builder: (controller) {
           return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Expanded(
                 child: StreamBuilder<List<ScanResult>>(
@@ -21,15 +22,18 @@ class BleScreen extends StatelessWidget {
                   builder: (context, snapshot) {
                     if (snapshot.hasData && snapshot.data!.isNotEmpty) {
                       return ListView.builder(
+                        shrinkWrap: true,
                         itemCount: snapshot.data!.length,
                         itemBuilder: (context, index) {
                           final data = snapshot.data![index];
                           return Card(
                             elevation: 2,
                             child: ListTile(
-                              title: Text(data.device.platformName),
+                              title: Text(data.device.advName),
                               subtitle: Text(data.device.remoteId.str),
                               trailing: Text(data.rssi.toString()),
+                              onTap: () =>
+                                  controller.connectDevice(data.device),
                             ),
                           );
                         },
@@ -38,6 +42,15 @@ class BleScreen extends StatelessWidget {
                       return Center(child: Text('No device founds'));
                     }
                   },
+                ),
+              ),
+              SizedBox(height: 40),
+              Text("Datos recibidos"),
+              Obx(
+                () => Column(
+                  children: controller.receivedDataList
+                      .map((data) => Text(data.toString()))
+                      .toList(),
                 ),
               ),
               SizedBox(height: 10),
@@ -50,7 +63,6 @@ class BleScreen extends StatelessWidget {
                 onPressed: () => controller.stopDevicesScan(),
                 child: Text('Stop Scan BLE'),
               ),
-              SizedBox(height: 20), 
             ],
           );
         },
