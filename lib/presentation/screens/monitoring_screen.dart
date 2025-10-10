@@ -9,9 +9,8 @@ import 'package:muscle_monitoring/presentation/providers/ble_provider.dart';
 
 class MonitoringScreen extends StatelessWidget {
   static const name = 'monitoring-screen';
-  final String deviceName;
 
-  const MonitoringScreen({super.key, required this.deviceName});
+  const MonitoringScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -19,14 +18,21 @@ class MonitoringScreen extends StatelessWidget {
   }
 }
 
-class _MonitoringScreenView extends StatelessWidget {
-  const _MonitoringScreenView({super.key});
+class _MonitoringScreenView extends ConsumerWidget {
+  const _MonitoringScreenView();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    var deviceName = ref.watch(bleProvider).currentDevice?.advName;
+
+    if (deviceName != null && deviceName.isEmpty) {
+      deviceName = 'dispositivo';
+    }
+
     return CustomScrollView(
       slivers: [
         const SliverAppBar(
+          title: Text('Monitoreo muscular', style: TextStyle(fontSize: 20)),
           toolbarHeight: 40,
           floating: true,
           flexibleSpace: FlexibleSpaceBar(
@@ -36,7 +42,15 @@ class _MonitoringScreenView extends StatelessWidget {
         ),
         SliverList(
           delegate: SliverChildBuilderDelegate((context, index) {
-            return Column(children: [_MonitoringChart()]);
+            return Column(
+              children: [
+                (deviceName != null)
+                    ? Text('Conectado a $deviceName')
+                    : Text('Esperando conexion...'),
+
+                _MonitoringChart(),
+              ],
+            );
           }, childCount: 1),
         ),
       ],
@@ -67,6 +81,7 @@ class _MonitoringChartState extends ConsumerState<_MonitoringChart> {
   @override
   void initState() {
     super.initState();
+    ref.read(bleProvider.notifier);
     timer = Timer.periodic(const Duration(milliseconds: 40), (timer) {
       while (sinPoints.length > limitCount) {
         sinPoints.removeAt(0);
@@ -82,7 +97,7 @@ class _MonitoringChartState extends ConsumerState<_MonitoringChart> {
 
   @override
   Widget build(BuildContext context) {
-    final bleDataList = ref.watch(bleProvider); // List<BleDataPoint>
+    final bleDataList = ref.watch(bleProvider).data; // List<BleDataPoint>
     final points = bleDataList.map((e) => FlSpot(e.x, e.y)).toList();
 
     return Column(

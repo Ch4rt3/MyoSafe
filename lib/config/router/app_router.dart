@@ -1,26 +1,37 @@
 import 'package:go_router/go_router.dart';
 import 'package:muscle_monitoring/presentation/screens/ble_screen.dart';
+import 'package:muscle_monitoring/presentation/screens/home_screen.dart';
 import 'package:muscle_monitoring/presentation/screens/monitoring_screen.dart';
 
 class AppRouter {
   static final GoRouter router = GoRouter(
+    initialLocation: '/home/0',
     routes: [
       GoRoute(
-        path: '/',
+        path: '/home/:page',
         name: BleScreen.name,
-        builder: (context, state) => BleScreen(),
+        builder: (context, state) {
+          int.parse(state.pathParameters['page'] ?? '0');
+
+          return HomeScreen();
+        },
         routes: [
           GoRoute(
-            path: '/device/:name',
+            path: '/',
+            builder: (context, state) {
+              return const BleScreen();
+            },
+          ),
+          GoRoute(
+            path: '/device',
             name: MonitoringScreen.name,
             builder: (context, state) {
-              final deviceName = state.pathParameters['name'] ?? 'no-name';
-              return MonitoringScreen(deviceName: deviceName);
+              return MonitoringScreen();
             },
           ),
         ],
       ),
-      // Puedes agregar más rutas aquí
+      GoRoute(path: '/', redirect: (_, __) => '/home/0'),
     ],
   );
 }

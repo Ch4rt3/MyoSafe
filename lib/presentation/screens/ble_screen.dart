@@ -15,7 +15,7 @@ class BleScreen extends ConsumerWidget {
     // final receivedDataList = ref.watch(bleProvider);
 
     return Scaffold(
-      appBar: AppBar(title: Text('Prueba de concepto')),
+      appBar: AppBar(title: Text('Buscar dispositivo')),
       body: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [

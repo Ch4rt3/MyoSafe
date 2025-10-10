@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:muscle_monitoring/presentation/providers/ble_provider.dart';
+import 'package:muscle_monitoring/presentation/providers/page_index_provider.dart';
 
 class DeviceCard extends ConsumerWidget {
   final ScanResult data;
@@ -15,64 +15,55 @@ class DeviceCard extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, ref) {
-    final bleNotifier = ref.watch(bleProvider.notifier);
-    final connectionState = bleNotifier.connectionState;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final connectionState = ref.watch(bleProvider).connectionState;
+    final currentDevice = ref.watch(bleProvider).currentDevice;
 
-    // Verificar si este es el dispositivo actual
-    final isCurrentDevice =
-        bleNotifier.currentDevice?.remoteId == data.device.remoteId;
-    final isConnecting =
-        connectionState == BleConnectionState.connecting && isCurrentDevice;
-    final isConnected =
-        connectionState == BleConnectionState.connected && isCurrentDevice;
-    final isDisabled =
-        (connectionState == BleConnectionState.connecting ||
-            connectionState == BleConnectionState.connected) &&
-        !isCurrentDevice;
+    final isCurrent = currentDevice?.remoteId == data.device.remoteId;
 
-    Color cardColor = Colors.white;
-    if (isConnecting || isConnected) {
-      cardColor = Theme.of(context).primaryColor;
-    }
-    Widget? trailingWidget;
-    if (isConnecting) {
-      trailingWidget = const SizedBox(
-        width: 20,
-        height: 20,
+    // 👇 definimos un solo "estado visual" para este dispositivo
+    final deviceStatus = switch (connectionState) {
+      BleConnectionState.connecting when isCurrent => 'connecting',
+      BleConnectionState.connected when isCurrent => 'connected',
+      _ => 'idle',
+    };
+
+    // 👇 widgets según estado
+    Widget trailing = switch (deviceStatus) {
+      'connecting' => const SizedBox(
+        width: 24,
+        height: 24,
         child: CircularProgressIndicator(strokeWidth: 2),
-      );
-    } else if (isConnected) {
-      trailingWidget = Icon(
-        Icons.check_circle,
-        color: Theme.of(context).primaryColor,
-      );
-    } else {
-      trailingWidget = Text(data.rssi.toString());
-    }
+      ),
+      'connected' => const Icon(Icons.check_circle, color: Colors.green),
+      _ => Text('${data.rssi}'),
+    };
+
+    // 👇 color y desactivación según estado global
+    final isDisabled =
+        connectionState == BleConnectionState.connecting && !isCurrent;
 
     return IgnorePointer(
       ignoring: isDisabled,
       child: Card(
         elevation: 2,
-        color: cardColor,
+        color: deviceStatus == 'connected'
+            ? Colors.blue.shade100
+            : Colors.white,
         child: ListTile(
           title: Text(
-            data.device.advName,
-            style: TextStyle(color: isDisabled ? Colors.grey : null),
+            data.device.advName.isNotEmpty
+                ? data.device.advName
+                : 'Unknown Device',
           ),
-          subtitle: Text(
-            data.device.remoteId.str,
-            style: TextStyle(color: isDisabled ? Colors.grey : null),
-          ),
-          trailing: trailingWidget,
+          subtitle: Text(data.device.remoteId.str),
+          trailing: trailing,
           onTap: isDisabled
               ? null
               : () async {
                   await bleController.connectDevice(data.device);
-                  if (context.mounted) {
-                    context.push('/device/${data.device.remoteId.str}');
-                  }
+                  // Cambia a la pestaña de monitoreo
+                  ref.read(pageIndexProvider.notifier).state = 1;
                 },
         ),
       ),
