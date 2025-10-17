@@ -1,9 +1,6 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'dart:math' as math;
 
 import 'package:muscle_monitoring/presentation/providers/ble_provider.dart';
 
@@ -14,7 +11,7 @@ class MonitoringScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(body: _MonitoringScreenView());
+    return const Scaffold(body: _MonitoringScreenView());
   }
 }
 
@@ -45,10 +42,30 @@ class _MonitoringScreenView extends ConsumerWidget {
             return Column(
               children: [
                 (deviceName != null)
-                    ? Text('Conectado a $deviceName')
-                    : Text('Esperando conexion...'),
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8.0),
+                        child: Text('Conectado a $deviceName'),
+                      )
+                    : const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8.0),
+                        child: Text('Esperando conexion...'),
+                      ),
 
-                _MonitoringChart(),
+                const SizedBox(height: 12),
+                // Chart de Fuerza
+                SectionChart(
+                  title: 'Fuerza',
+                  color: Colors.blue,
+                  getPoints: (ref) => ref.watch(bleProvider).dataFuerza,
+                ),
+                const SizedBox(height: 16),
+                // Chart de Fatiga
+                SectionChart(
+                  title: 'Fatiga',
+                  color: Colors.pink,
+                  getPoints: (ref) => ref.watch(bleProvider).dataFatiga,
+                ),
+                const SizedBox(height: 24),
               ],
             );
           }, childCount: 1),
@@ -58,127 +75,106 @@ class _MonitoringScreenView extends ConsumerWidget {
   }
 }
 
-class _MonitoringChart extends ConsumerStatefulWidget {
-  const _MonitoringChart();
+typedef PointsSelector = List<BleDataPoint> Function(WidgetRef ref);
 
-  final Color sinColor = Colors.blue;
-  final Color cosColor = Colors.pink;
+class SectionChart extends ConsumerWidget {
+  final String title;
+  final Color color;
+  final PointsSelector getPoints;
+  final int visiblePoints;
 
-  @override
-  ConsumerState<_MonitoringChart> createState() => _MonitoringChartState();
-}
-
-class _MonitoringChartState extends ConsumerState<_MonitoringChart> {
-  final limitCount = 100;
-  final sinPoints = <FlSpot>[];
-  final cosPoints = <FlSpot>[];
-
-  double xValue = 0;
-  double step = 0.05;
-
-  late Timer timer;
+  const SectionChart({
+    super.key,
+    required this.title,
+    required this.color,
+    required this.getPoints,
+    this.visiblePoints = 120,
+  });
 
   @override
-  void initState() {
-    super.initState();
-    ref.read(bleProvider.notifier);
-    timer = Timer.periodic(const Duration(milliseconds: 40), (timer) {
-      while (sinPoints.length > limitCount) {
-        sinPoints.removeAt(0);
-        cosPoints.removeAt(0);
-      }
-      setState(() {
-        sinPoints.add(FlSpot(xValue, math.sin(xValue)));
-        cosPoints.add(FlSpot(xValue, math.cos(xValue)));
-      });
-      xValue += step;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final data = getPoints(ref);
+    final recent = data.length <= visiblePoints
+        ? data
+        : data.sublist(data.length - visiblePoints);
+
+    final points = List<FlSpot>.generate(recent.length, (i) {
+      return FlSpot(i.toDouble(), recent[i].y);
     });
-  }
 
-  @override
-  Widget build(BuildContext context) {
-    final bleDataList = ref.watch(bleProvider).data; // List<BleDataPoint>
-    final points = bleDataList.map((e) => FlSpot(e.x, e.y)).toList();
+    final lastValue = recent.isNotEmpty ? recent.last.y : null;
 
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const SizedBox(height: 12),
-        if (points.isNotEmpty) ...[
-          Text(
-            'x: ${points.last.x.toStringAsFixed(1)}',
-            style: const TextStyle(
-              color: Colors.black,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.symmetric(horizontal: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  lastValue != null ? lastValue.toStringAsFixed(0) : '--',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                ),
+              ],
             ),
-          ),
-          Text(
-            'y: ${points.last.y.toStringAsFixed(1)}',
-            style: TextStyle(
-              color: widget.sinColor,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ] else ...[
-          Text(
-            'Esperando datos...',
-            style: TextStyle(
-              color: Colors.grey[700],
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ],
-        const SizedBox(height: 12),
-        AspectRatio(
-          aspectRatio: 1.5,
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 24.0),
-            child: LineChart(
-              LineChartData(
-                minY: points.isNotEmpty
-                    ? points.map((e) => e.y).reduce((a, b) => a < b ? a : b)
-                    : 0,
-                maxY: points.isNotEmpty
-                    ? points.map((e) => e.y).reduce((a, b) => a > b ? a : b)
-                    : 1,
-                minX: points.isNotEmpty ? points.first.x : 0,
-                maxX: points.isNotEmpty ? points.last.x : 100,
-                lineTouchData: const LineTouchData(enabled: false),
-                clipData: const FlClipData.all(),
-                gridData: const FlGridData(show: true, drawVerticalLine: false),
-                borderData: FlBorderData(show: false),
-                lineBarsData: points.isNotEmpty
-                    ? [
-                        LineChartBarData(
-                          spots: points,
-                          dotData: const FlDotData(show: false),
-                          gradient: LinearGradient(
-                            colors: [
-                              widget.sinColor.withAlpha(0),
-                              widget.sinColor,
-                            ],
-                            stops: const [0.1, 1.0],
-                          ),
-                          barWidth: 4,
-                          isCurved: false,
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 180,
+              child: points.isNotEmpty
+                  ? LineChart(
+                      LineChartData(
+                        minY: points
+                            .map((e) => e.y)
+                            .reduce((a, b) => a < b ? a : b),
+                        maxY: points
+                            .map((e) => e.y)
+                            .reduce((a, b) => a > b ? a : b),
+                        minX: 0,
+                        maxX: visiblePoints.toDouble(),
+                        lineTouchData: const LineTouchData(enabled: false),
+                        clipData: const FlClipData.all(),
+                        gridData: const FlGridData(
+                          show: true,
+                          drawVerticalLine: false,
                         ),
-                      ]
-                    : [],
-                titlesData: const FlTitlesData(show: false),
-              ),
+                        borderData: FlBorderData(show: false),
+                        lineBarsData: [
+                          LineChartBarData(
+                            spots: points,
+                            dotData: const FlDotData(show: false),
+                            gradient: LinearGradient(
+                              colors: [color.withAlpha(0), color],
+                              stops: const [0.1, 1.0],
+                            ),
+                            barWidth: 3,
+                            isCurved: false,
+                          ),
+                        ],
+                        titlesData: const FlTitlesData(show: false),
+                      ),
+                    )
+                  : const Center(child: Text('Esperando datos...')),
             ),
-          ),
+          ],
         ),
-      ],
+      ),
     );
-  }
-
-  @override
-  void dispose() {
-    timer.cancel();
-    super.dispose();
   }
 }
