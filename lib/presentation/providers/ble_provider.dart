@@ -59,15 +59,26 @@ class BleNotifier extends StateNotifier<BleState> {
   // Máximo de puntos a mantener en memoria (ajusta según rendimiento/UX)
   final int maxDataPoints = 200;
   Timer? _simTimer;
-  final Random _rand = Random();
-  // UUIDs esperadas del ESP32
+  // ignore: unused_field
+  final Random _rand = Random(); // Usado en modo simulación (comentado abajo)
+
+  // Subscripciones a los streams BLE (para cancelarlas al desconectar)
+  StreamSubscription? _fuerzaSubscription;
+  StreamSubscription? _fatigaSubscription;
+
+  // UUIDs esperadas del ESP32 (en minúsculas para comparación)
   static const String serviceFuerzaUuid =
       '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
   static const String charFuerzaUuid = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
 
+  // UUIDs de FATIGA (formato completo y corto)
   static const String serviceFatigaUuid =
       '6b2f0001-0000-1000-8000-00805f9b34fb';
+  static const String serviceFatigaUuidCorto =
+      '6b2f0001'; // UUID corto (16-bit)
+
   static const String charFatigaUuid = '6b2f0002-0000-1000-8000-00805f9b34fb';
+  static const String charFatigaUuidCorto = '6b2f0002'; // UUID corto (16-bit)
 
   Stream<List<ScanResult>> get scanResults => FlutterBluePlus.scanResults;
 
@@ -77,10 +88,14 @@ class BleNotifier extends StateNotifier<BleState> {
 
   void setCurrentDevice(BluetoothDevice? device) {
     state = state.copyWith(currentDevice: device);
-    // Si se desconecta, detenemos la simulación (si estaba corriendo)
+    // Si se desconecta, cancelamos todas las suscripciones y timers
     if (device == null) {
       _simTimer?.cancel();
       _simTimer = null;
+      _fuerzaSubscription?.cancel();
+      _fuerzaSubscription = null;
+      _fatigaSubscription?.cancel();
+      _fatigaSubscription = null;
     }
   }
 
@@ -125,58 +140,199 @@ class BleNotifier extends StateNotifier<BleState> {
   Future<void> connectDevice(BluetoothDevice device) async {
     setCurrentDevice(device);
     setConnectionState(BleConnectionState.connecting);
+
     try {
+      // Conectar al dispositivo
       await device.connect(timeout: Duration(seconds: 15));
+      print('✅ Conectado al dispositivo: ${device.platformName}');
+
       setConnectionState(BleConnectionState.connected);
+
+      // Escuchar cambios de estado de conexión
       device.connectionState.listen((connState) {
         if (connState == BluetoothConnectionState.connected) {
           setConnectionState(BleConnectionState.connected);
         } else if (connState == BluetoothConnectionState.disconnected) {
+          print('❌ Dispositivo desconectado');
           setConnectionState(BleConnectionState.disconnected);
           setCurrentDevice(null);
         }
       });
 
-      // --- Código original para descubrir servicios y suscribirse a notificaciones ---
+      // ⏳ DELAY IMPORTANTE: Esperar a que el dispositivo esté completamente listo
+      await Future.delayed(const Duration(seconds: 2));
+      print('🔍 Iniciando descubrimiento de servicios...');
+
+      // Descubrir servicios BLE
       List<BluetoothService> services = await device.discoverServices();
+      print('📡 Servicios descubiertos: ${services.length}');
+      print('');
+      print('═══════════════════════════════════════════════════════');
+      print('🔎 LISTADO COMPLETO DE SERVICIOS Y CARACTERÍSTICAS');
+      print('═══════════════════════════════════════════════════════');
 
       BluetoothCharacteristic? fuerzaChar;
       BluetoothCharacteristic? fatigaChar;
 
-      for (var service in services) {
-        final svcUuid = service.uuid.toString();
-        for (var characteristic in service.characteristics) {
-          final charUuid = characteristic.uuid.toString();
-          if (charUuid == charFuerzaUuid || svcUuid == serviceFuerzaUuid) {
-            fuerzaChar = characteristic;
-          }
-          if (charUuid == charFatigaUuid || svcUuid == serviceFatigaUuid) {
-            fatigaChar = characteristic;
-          }
+      // Recorrer servicios y características CON LOGGING DETALLADO
+      for (int i = 0; i < services.length; i++) {
+        var service = services[i];
+        final svcUuid = service.uuid.toString().toLowerCase();
+
+        print('');
+        print('┌─ SERVICIO #${i + 1}');
+        print('│  UUID: $svcUuid');
+        print('│  UUID Original: ${service.uuid.toString()}');
+        print('│  Características: ${service.characteristics.length}');
+
+        // Comparar con UUIDs esperados
+        bool esFuerza = svcUuid == serviceFuerzaUuid.toLowerCase();
+        bool esFatiga =
+            svcUuid == serviceFatigaUuid.toLowerCase() ||
+            svcUuid == serviceFatigaUuidCorto.toLowerCase();
+
+        if (esFuerza) {
+          print('│  ✅ ¡Este es el servicio de FUERZA!');
         }
+        if (esFatiga) {
+          print('│  ✅ ¡Este es el servicio de FATIGA!');
+        }
+        if (!esFuerza && !esFatiga) {
+          print('│  ℹ️  Servicio desconocido/genérico');
+        }
+
+        print('│');
+
+        for (int j = 0; j < service.characteristics.length; j++) {
+          var characteristic = service.characteristics[j];
+          final charUuid = characteristic.uuid.toString().toLowerCase();
+
+          print('│  ├─ Characteristic #${j + 1}');
+          print('│  │   UUID: $charUuid');
+          print('│  │   UUID Original: ${characteristic.uuid.toString()}');
+          print('│  │   Properties: ${characteristic.properties}');
+
+          // Comparar con UUIDs esperados
+          bool esCharFuerza = charUuid == charFuerzaUuid.toLowerCase();
+          bool esCharFatiga =
+              charUuid == charFatigaUuid.toLowerCase() ||
+              charUuid == charFatigaUuidCorto.toLowerCase();
+
+          if (esCharFuerza) {
+            print('│  │   ✅ ¡Esta es la characteristic de FUERZA!');
+          }
+          if (esCharFatiga) {
+            print('│  │   ✅ ¡Esta es la characteristic de FATIGA!');
+          }
+
+          // ✅ CORRECCIÓN: Comparar correctamente cada UUID
+          // Buscar characteristic de FUERZA
+          if (svcUuid == serviceFuerzaUuid.toLowerCase() &&
+              charUuid == charFuerzaUuid.toLowerCase()) {
+            fuerzaChar = characteristic;
+            print('│  │   💪 ¡ASIGNADA como characteristic de FUERZA!');
+          }
+
+          // Buscar characteristic de FATIGA (soporta UUID corto y largo)
+          if ((svcUuid == serviceFatigaUuid.toLowerCase() ||
+                  svcUuid == serviceFatigaUuidCorto.toLowerCase()) &&
+              (charUuid == charFatigaUuid.toLowerCase() ||
+                  charUuid == charFatigaUuidCorto.toLowerCase())) {
+            fatigaChar = characteristic;
+            print('│  │   ⚡ ¡ASIGNADA como characteristic de FATIGA!');
+          }
+
+          print('│  │');
+        }
+        print('└─────────────────────────────────────────────────');
       }
 
+      print('');
+      print('═══════════════════════════════════════════════════════');
+      print('📊 RESUMEN DE DETECCIÓN');
+      print('═══════════════════════════════════════════════════════');
+      print('UUIDs ESPERADOS:');
+      print('  Fuerza Service:  ${serviceFuerzaUuid.toLowerCase()}');
+      print('  Fuerza Char:     ${charFuerzaUuid.toLowerCase()}');
+      print(
+        '  Fatiga Service:  ${serviceFatigaUuid.toLowerCase()} O $serviceFatigaUuidCorto',
+      );
+      print(
+        '  Fatiga Char:     ${charFatigaUuid.toLowerCase()} O $charFatigaUuidCorto',
+      );
+      print('');
+      print('RESULTADO:');
+      print(
+        '  Fuerza Char encontrada: ${fuerzaChar != null ? "✅ SÍ" : "❌ NO"}',
+      );
+      print(
+        '  Fatiga Char encontrada: ${fatigaChar != null ? "✅ SÍ" : "❌ NO"}',
+      );
+      print('═══════════════════════════════════════════════════════');
+      print('');
+
+      // Suscribirse a la characteristic de FUERZA
       if (fuerzaChar != null) {
+        print('🔔 Activando notificaciones de FUERZA...');
         await fuerzaChar.setNotifyValue(true);
-        fuerzaChar.lastValueStream.listen((value) {
-          if (value.isNotEmpty) {
-            final v = value.first.toDouble();
-            addFuerza(v);
-          }
-        });
+
+        // Cancelar suscripción anterior si existe
+        await _fuerzaSubscription?.cancel();
+
+        _fuerzaSubscription = fuerzaChar.lastValueStream.listen(
+          (value) {
+            if (value.isNotEmpty) {
+              final v = value.first.toDouble();
+              //print('💪 Fuerza recibida: $v');
+              addFuerza(v);
+            }
+          },
+          onError: (error) {
+            print('❌ Error en stream de fuerza: $error');
+          },
+        );
+
+        print('✅ Suscrito a notificaciones de FUERZA');
+      } else {
+        print('⚠️ No se encontró la characteristic de FUERZA');
       }
 
+      // Suscribirse a la characteristic de FATIGA
       if (fatigaChar != null) {
+        print('🔔 Activando notificaciones de FATIGA...');
         await fatigaChar.setNotifyValue(true);
-        fatigaChar.lastValueStream.listen((value) {
-          if (value.isNotEmpty) {
-            final v = value.first.toDouble();
-            addFatiga(v);
-          }
-        });
+
+        // Cancelar suscripción anterior si existe
+        await _fatigaSubscription?.cancel();
+
+        _fatigaSubscription = fatigaChar.lastValueStream.listen(
+          (value) {
+            if (value.isNotEmpty) {
+              final v = value.first.toDouble();
+              //print('⚡ Fatiga recibida: $v');
+              addFatiga(v);
+            }
+          },
+          onError: (error) {
+            print('❌ Error en stream de fatiga: $error');
+          },
+        );
+
+        print('✅ Suscrito a notificaciones de FATIGA');
+      } else {
+        print('⚠️ No se encontró la characteristic de FATIGA');
       }
 
-      // --- Modo simulación: generar datos aleatorios 0..255 para Fuerza y Fatiga ---
+      // Resumen final
+      if (fuerzaChar != null && fatigaChar != null) {
+        print('🎉 Ambas características configuradas correctamente');
+      } else if (fuerzaChar != null || fatigaChar != null) {
+        print('⚠️ Solo una característica está disponible');
+      } else {
+        print('❌ No se encontraron las características esperadas');
+      }
+
+      // --- Modo simulación (comentado, descomentar si necesitas probar sin hardware) ---
       // _simTimer?.cancel();
       // _simTimer = Timer.periodic(const Duration(milliseconds: 40), (_) {
       //   final f = _rand.nextInt(256).toDouble();
@@ -185,9 +341,50 @@ class BleNotifier extends StateNotifier<BleState> {
       //   addFatiga(fa);
       // });
     } catch (e) {
+      print('❌ Error al conectar: $e');
       setConnectionState(BleConnectionState.disconnected);
       setCurrentDevice(null);
     }
+  }
+
+  /// Desconectar dispositivo BLE limpiamente
+  Future<void> disconnectDevice() async {
+    final device = state.currentDevice;
+    if (device == null) return;
+
+    try {
+      print('🔌 Desconectando dispositivo...');
+
+      // Cancelar suscripciones
+      await _fuerzaSubscription?.cancel();
+      _fuerzaSubscription = null;
+
+      await _fatigaSubscription?.cancel();
+      _fatigaSubscription = null;
+
+      // Cancelar timer de simulación
+      _simTimer?.cancel();
+      _simTimer = null;
+
+      // Desconectar
+      await device.disconnect();
+
+      setConnectionState(BleConnectionState.disconnected);
+      setCurrentDevice(null);
+
+      print('✅ Dispositivo desconectado correctamente');
+    } catch (e) {
+      print('❌ Error al desconectar: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    // Limpiar recursos al destruir el provider
+    _fuerzaSubscription?.cancel();
+    _fatigaSubscription?.cancel();
+    _simTimer?.cancel();
+    super.dispose();
   }
 }
 
